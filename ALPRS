@@ -1,0 +1,62 @@
+import cv2
+from easyocr import Reader
+import mysql.connector
+from datetime import datetime
+import time
+
+# Initialize EasyOCR reader
+reader = Reader(['en'])
+
+# Initialize webcam
+cap = cv2.VideoCapture(0)
+
+# Connect to MySQL database
+db = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    password="1234",
+    database="mydb"
+)
+cursor = db.cursor()
+stabilize_time = 5  # seconds
+start_time = time.time()
+
+while True:
+    # Read a frame from the webcam
+    ret, frame = cap.read()
+
+    # Perform OCR on the frame
+    results = reader.readtext(frame)
+
+    # Process the results and store in the database
+    for (bbox, text, prob) in results:
+        # Check if the text is not in the database to avoid duplicates
+        cursor.execute("SELECT * FROM number_plate_data WHERE plate_text = %s", (text,))
+        existing_records = cursor.fetchall()
+
+        if not existing_records:
+            # Insert the recognized data into the database
+            insert_query = "INSERT INTO number_plate_data (plate_text, recognition_time) VALUES (%s, %s)"
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute(insert_query, (text, current_time))
+            db.commit()
+
+            # Display the results on the frame
+            (top_left, top_right, bottom_right, bottom_left) = bbox
+            top_left = tuple(map(int, top_left))
+            bottom_right = tuple(map(int, bottom_right))
+            cv2.rectangle(frame, top_left, bottom_right, (0, 255, 0), 2)
+            cv2.putText(frame, f"{text} - {current_time}", (top_left[0], top_left[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+    # Display the frame
+    cv2.imshow("Vehicle Number Plate Recognition", frame)
+
+    # Break the loop if 'q' key is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release the webcam, close the database connection, and close all windows
+cap.release()
+db.close()
+cv2.destroyAllWindows()
